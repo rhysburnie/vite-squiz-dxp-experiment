@@ -1,3 +1,3 @@
-# vite-squiz-dxp-experiment
+# squiz-dxp-experiments
 
 ok
