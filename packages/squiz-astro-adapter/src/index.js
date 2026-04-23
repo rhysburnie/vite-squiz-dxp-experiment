@@ -2,11 +2,6 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-const routeToName = (route) => {
-  if (route === '/') return 'index';
-  return route.replace(/^\//, '').replace(/\/$/, '').replace(/\//g, '-') || 'index';
-};
-
 const extractComponentTemplate = (componentSource) => {
   const frontmatterMatch = componentSource.match(/^---\n([\s\S]*?)\n---\n/);
   const template = frontmatterMatch ? componentSource.slice(frontmatterMatch[0].length) : componentSource;
@@ -15,38 +10,6 @@ const extractComponentTemplate = (componentSource) => {
 
 const compileComponentTemplate = (template) => {
   return template.replace(/\{\s*([a-zA-Z_$][a-zA-Z0-9_$]*)\s*\}/g, (_, name) => `\${props.${name}}`);
-};
-
-const preserveRenderedAttributes = (renderedHtml, compiledTemplate) => {
-  const renderedOpenTag = renderedHtml.match(/^<[^>]+>/);
-  if (!renderedOpenTag) return compiledTemplate;
-  return compiledTemplate.replace(/^<[^>]+>/, renderedOpenTag[0]);
-};
-
-const renderSquizModule = (html, componentSource) => {
-  // Remove DOCTYPE and html/body tags if present
-  let cleanHtml = html.replace(/^<!DOCTYPE[^>]*>/i, '').trim();
-  if (cleanHtml.startsWith('<html')) {
-    const bodyMatch = cleanHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-    if (bodyMatch) {
-      cleanHtml = bodyMatch[1];
-    }
-  }
-  cleanHtml = cleanHtml.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-  cleanHtml = cleanHtml.replace(/<link[^>]*rel=["']?stylesheet["']?[^>]*>/gi, '');
-
-  if (componentSource) {
-    const template = extractComponentTemplate(componentSource);
-    const compiled = compileComponentTemplate(template);
-    const finalHtml = preserveRenderedAttributes(cleanHtml, compiled);
-    return `export default function render(props) {
-  return \`${finalHtml}\`;
-}`;
-  }
-
-  return `export default function render(props) {
-  return \`${cleanHtml}\`;
-}`;
 };
 
 const collectAssetFiles = (manifest) => {
@@ -89,33 +52,31 @@ export default function squizAstroAdapter(options = {}) {
         updateConfig({ output: 'static' });
       },
 
-      async 'astro:build:done'({ dir, pages }) {
+      async 'astro:build:done'({ dir }) {
         const outputDir = fileURLToPath(dir);
 
-        for (const page of pages) {
-          const route = page.pathname || '/';
-          if (route !== '/') continue; // only process the index page for now
-          const filePath = path.join(outputDir, page.pathname || 'index.html');
-          const htmlFile = filePath;
-          let html;
-          try {
-            html = await fs.readFile(htmlFile, 'utf8');
-          } catch (error) {
-            continue;
-          }
-
-          const componentName = 'hello-world'; // hardcoded for now
-          const componentPath = path.join(path.dirname(outputDir), 'src', 'hello-world', 'hello-world.astro');
+        const srcDir = path.join(path.dirname(outputDir), 'src');
+        const componentDirs = await fs.readdir(srcDir);
+        for (const dir of componentDirs) {
+          if (dir === 'pages') continue;
+          const componentName = dir;
+          const componentPath = path.join(srcDir, dir, `${dir}.astro`);
           let componentSource = null;
           try {
             componentSource = await fs.readFile(componentPath, 'utf8');
           } catch (error) {
-            componentSource = null;
+            continue;
           }
+
+          const template = extractComponentTemplate(componentSource);
+          const compiled = compileComponentTemplate(template);
+          const moduleContent = `export default function render(props) {
+  return \`${compiled}\`;
+}`;
 
           const targetDir = path.join(outputDir, componentName);
           await fs.mkdir(targetDir, { recursive: true });
-          await fs.writeFile(path.join(targetDir, 'main.js'), renderSquizModule(html, componentSource), 'utf8');
+          await fs.writeFile(path.join(targetDir, 'main.js'), moduleContent, 'utf8');
         }
 
         const manifestPath = path.join(outputDir, '_astro', 'manifest.json');

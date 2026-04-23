@@ -6,5 +6,5 @@ export default defineConfig({
   build: {
     inlineStylesheets: 'never'
   },
-  integrations: [squizAstroAdapter()],
+  integrations: [],
 });
